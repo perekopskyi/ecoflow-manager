@@ -1,0 +1,8 @@
+.venv/
+.env
+.telegram_chat_id
+.dashboard_message_id
+.telegram_chats.json
+quota_all.json
+__pycache__/
+*.pyc
