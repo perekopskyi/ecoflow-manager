@@ -16,13 +16,15 @@ if [ ! -f .env ]; then
 fi
 
 echo "==> Copying files to $SERVER:~/$REMOTE_DIR"
-ssh "$SERVER" "mkdir -p ~/$REMOTE_DIR"
-rsync -avz --delete \
-  --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  --exclude '.git' --exclude 'quota_all.json' \
-  ./ "$SERVER:~/$REMOTE_DIR/"
+COPYFILE_DISABLE=1 tar -czf - \
+  --exclude='.venv' --exclude='*/.venv' \
+  --exclude='__pycache__' --exclude='*/__pycache__' \
+  --exclude='*.pyc' \
+  --exclude='.git' --exclude='*/.git' \
+  --exclude='quota_all.json' \
+  . | ssh "$SERVER" "mkdir -p ~/$REMOTE_DIR && tar -xzf - -C ~/$REMOTE_DIR"
 
 echo "==> Securing .env and starting the container"
-ssh "$SERVER" "cd ~/$REMOTE_DIR && chmod 600 .env && docker compose up -d --build && docker compose ps"
+ssh -t "$SERVER" "cd ~/$REMOTE_DIR && chmod 600 .env && sudo docker compose up -d --build && sudo docker compose ps"
 
-echo "==> Done. Logs: ssh $SERVER 'cd ~/$REMOTE_DIR && docker compose logs -f'"
+echo "==> Done. Logs: ssh -t $SERVER 'cd ~/$REMOTE_DIR && sudo docker compose logs -f'"
