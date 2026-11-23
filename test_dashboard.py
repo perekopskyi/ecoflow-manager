@@ -28,6 +28,8 @@ def sample_quota():
         "pd.qcUsb2Watts": 0,
         "pd.remainTime": 1173,
         "pd.sysChgDsgState": 1,
+        "bmsMaster.remainCap": 68946,
+        "bmsMaster.vol": 49788,
     }
 
 
@@ -40,10 +42,11 @@ def test_render_dashboard():
     text = render(snapshot)
     assert "🔋 DELTA Pro" in text
     assert "🟢 онлайн" in text
-    assert "87%" in text
-    assert "█████████░" in text
+    assert "87% · 3.43 кВт·ч" in text
+    assert "🔋" * 9 + "🪫" in text
     assert "⬇️ Вход 0 Вт · ⬆️ Выход 130 Вт" in text
-    assert "🔌 Сеть 0 Вт · ☀️ Солнце 0 Вт · 💻 USB 5 Вт" in text
+    assert "🔌 Сеть 0 Вт · 💻 USB 5 Вт" in text
+    assert "Солнце" not in text
     assert "⏱ Осталось 19 ч 33 мин" in text
     assert "⚡ разряд" in text
     assert "🕐 10:54:12" in text
@@ -185,3 +188,28 @@ def test_api_error_does_not_alert():
     assert state.online is True
     assert "⚠️ Не удалось получить данные" in render(failed)
     assert "timeout" in render(failed)
+
+
+def test_soc_bar_uses_ten_batteries():
+    from dashboard import soc_bar
+
+    assert soc_bar(0) == "🪫" * 10
+    assert soc_bar(34) == "🔋" * 3 + "🪫" * 7
+    assert soc_bar(100) == "🔋" * 10
+    assert soc_bar(None) == "🪫" * 10
+
+
+def test_energy_missing_shows_dash():
+    quota = sample_quota()
+    del quota["bmsMaster.remainCap"]
+    text = render(snapshot_from_quota(quota, sample_device(), updated_at=NOW))
+    assert "87% · — кВт·ч" in text
+
+
+def test_clock_uses_dashboard_timezone(monkeypatch):
+    from dashboard import local_now
+
+    monkeypatch.setenv("DASHBOARD_TZ", "Europe/Kyiv")
+    assert local_now().tzinfo.key == "Europe/Kyiv"
+    monkeypatch.setenv("DASHBOARD_TZ", "Not/AZone")
+    assert local_now().tzinfo.key == "Europe/Kyiv"

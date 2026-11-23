@@ -1,13 +1,29 @@
 """DELTA Pro dashboard snapshot and Telegram text."""
 
+import os
 from dataclasses import dataclass
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 POWER_LABELS = {0: "простой", 1: "разряд", 2: "заряд"}
 POWER_EMOJI = {0: "⏸", 1: "⚡", 2: "🔌"}
 PASSTHROUGH_LABEL = "транзит"
 PASSTHROUGH_EMOJI = "↔️"
 PASSTHROUGH_WATTS = 5
+DEFAULT_TIMEZONE = "Europe/Kyiv"
+
+
+def local_timezone():
+    """Timezone for the dashboard clock: DASHBOARD_TZ, else Europe/Kyiv."""
+    name = os.environ.get("DASHBOARD_TZ", "").strip() or DEFAULT_TIMEZONE
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo(DEFAULT_TIMEZONE)
+
+
+def local_now():
+    return datetime.now(local_timezone())
 
 
 def _number(value):
@@ -48,11 +64,27 @@ def format_duration(minutes):
 
 
 def soc_bar(soc):
+    """Ten batteries: 🔋 per charged 10%, 🪫 per empty 10%."""
     number = _number(soc)
     if number is None:
-        return "░░░░░░░░░░"
+        return "🪫" * 10
     filled = max(0, min(10, int(round(number / 10))))
-    return "█" * filled + "░" * (10 - filled)
+    return "🔋" * filled + "🪫" * (10 - filled)
+
+
+def energy_kwh(remain_mah, voltage_mv):
+    """Stored energy: remaining capacity (mAh) times pack voltage (mV)."""
+    capacity = _number(remain_mah)
+    voltage = _number(voltage_mv)
+    if capacity is None or voltage is None:
+        return None
+    return capacity * voltage / 1_000_000_000
+
+
+def format_kwh(value):
+    if value is None:
+        return "—"
+    return f"{value:.2f}"
 
 
 def format_soc(soc):
@@ -69,6 +101,7 @@ class Snapshot:
     product_name: str
     online: bool | None
     soc: float | None
+    energy_kwh: float | None
     watts_in: int | None
     watts_out: int | None
     ac_in: int | None
@@ -119,6 +152,10 @@ def snapshot_from_quota(quota, device=None, updated_at=None, error=None):
         product_name=name,
         online=online,
         soc=_number(values.get("pd.soc")),
+        energy_kwh=energy_kwh(
+            values.get("bmsMaster.remainCap"),
+            values.get("bmsMaster.vol"),
+        ),
         watts_in=_watts(values.get("pd.wattsInSum")),
         watts_out=_watts(values.get("pd.wattsOutSum")),
         ac_in=_watts(values.get("inv.inputWatts")),
@@ -132,7 +169,7 @@ def snapshot_from_quota(quota, device=None, updated_at=None, error=None):
         remain_minutes=_number(values.get("pd.remainTime")),
         power_state=None if state is None else int(state),
         grid_present=grid_present(values.get("inv.acInVol")),
-        updated_at=updated_at or datetime.now(),
+        updated_at=updated_at or local_now(),
         error=error,
     )
 
@@ -186,17 +223,17 @@ def render(snapshot):
         return "\n".join(lines)
 
     state_emoji, state = visible_status(snapshot)
+    sources = [f"🔌 Сеть {_watts_text(snapshot.ac_in)} Вт"]
+    if snapshot.solar:
+        sources.append(f"☀️ Солнце {_watts_text(snapshot.solar)} Вт")
+    sources.append(f"💻 USB {_watts_text(snapshot.usb)} Вт")
     lines.extend(
         [
-            f"{format_soc(snapshot.soc)}%",
+            f"{format_soc(snapshot.soc)}% · {format_kwh(snapshot.energy_kwh)} кВт·ч",
             soc_bar(snapshot.soc),
             "",
             f"⬇️ Вход {_watts_text(snapshot.watts_in)} Вт · ⬆️ Выход {_watts_text(snapshot.watts_out)} Вт",
-            (
-                f"🔌 Сеть {_watts_text(snapshot.ac_in)} Вт · "
-                f"☀️ Солнце {_watts_text(snapshot.solar)} Вт · "
-                f"💻 USB {_watts_text(snapshot.usb)} Вт"
-            ),
+            " · ".join(sources),
             f"⏱ Осталось {format_duration(snapshot.remain_minutes)}",
             f"{state_emoji} {state}",
             "",
